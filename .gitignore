@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.agents/skills/developing-with-streamlit
+sources/
+AGENTS.md
+review_app_local_state.json
+.streamlit/secrets.toml
