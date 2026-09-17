@@ -1,6 +1,6 @@
 import unittest
 
-from streamlit_review_app import partition_record_ids
+from streamlit_review_app import format_exclusion_reasons, parse_exclusion_reasons, partition_record_ids
 
 
 class PartitionRecordIdsTest(unittest.TestCase):
@@ -15,6 +15,22 @@ class PartitionRecordIdsTest(unittest.TestCase):
 
         self.assertEqual(available, ["RIS_0003", "RIS_0001"])
         self.assertEqual(missing, ["RIS_0002"])
+
+
+class ExclusionReasonsTest(unittest.TestCase):
+    def test_round_trip_multiple_reasons(self) -> None:
+        reasons = ["Ineligible population", "No eligible student outcome"]
+
+        stored = format_exclusion_reasons(reasons)
+
+        self.assertEqual(stored, "Ineligible population; No eligible student outcome")
+        self.assertEqual(parse_exclusion_reasons(stored), reasons)
+
+    def test_format_removes_blanks_and_duplicates(self) -> None:
+        self.assertEqual(
+            format_exclusion_reasons(["Ineligible population", "", "Ineligible population"]),
+            "Ineligible population",
+        )
 
 
 if __name__ == "__main__":

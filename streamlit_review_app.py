@@ -22,6 +22,50 @@ DEFAULT_SAMPLE_SIZE = 226
 SAMPLE_FRACTION = 0.20
 DECISIONS = ["Include", "Exclude", "Unsure"]
 AI_TO_REVIEW = {"Yes": "Include", "No": "Exclude", "Uncertain": "Unsure"}
+SCREENING_CRITERIA = {
+    "Population": {
+        "include": "Undergraduate students enrolled in higher education, including financially or socioeconomically disadvantaged students. Mixed samples qualify when eligible students are reported separately or form most of the sample.",
+        "exclude": "School pupils, prospective students not yet enrolled, further education or below-HE learners, postgraduate-only samples, or general student populations where support is unrelated to financial barriers.",
+    },
+    "Intervention": {
+        "include": "Direct financial or in-kind support received after entry, such as bursaries, grants, need-linked scholarships, hardship funds, stipends, cash, fee waivers, accommodation, food, transport, technology, or study materials.",
+        "exclude": "Repayable loans; financial education alone; academic, mentoring, or pastoral support alone; general funding policies without student-level support; or merit-only scholarships unrelated to need or target demographics.",
+    },
+    "Timing": {
+        "include": "Support delivered wholly or partly after enrolment. Pre-entry awards may qualify when payments continue during higher education and post-entry outcomes are evaluated.",
+        "exclude": "Support delivered entirely before entry and evaluated only through applications, admissions, or initial enrolment.",
+    },
+    "Comparator": {
+        "include": "No support, usual provision, delayed support, or an alternative type or amount of support assessed using a credible counterfactual.",
+        "exclude": "No comparison group or other credible counterfactual capable of supporting causal attribution.",
+    },
+    "Outcomes": {
+        "include": "Retention, continuation, persistence, attendance, attainment, credits, completion, graduation, withdrawal, dropout, re-enrolment, progression, or relevant secondary outcomes such as wellbeing and financial stress.",
+        "exclude": "Only applications, admissions, initial enrolment, awareness, take-up, satisfaction, expenditure, or administrative delivery outcomes.",
+    },
+    "Study design": {
+        "include": "Randomised trials and credible quasi-experimental or appropriately adjusted comparison-group studies.",
+        "exclude": "Qualitative-only, descriptive, uncontrolled before-and-after, simple cross-sectional, intervention-description, or process-only studies without causal analysis.",
+    },
+    "Publication": {
+        "include": "Peer-reviewed articles, institutional or government reports, working papers, dissertations, theses, and sufficiently detailed preprints published from 2014 to the final 2026 search date, with English full text available.",
+        "exclude": "Editorials, commentaries, protocols, news, conference abstracts, methodologically insufficient sources, pre-2014 publications, or sources without accessible English full text.",
+    },
+}
+EXCLUSION_REASONS = [
+    "Ineligible population",
+    "No eligible financial or in-kind support intervention",
+    "Repayable loan only",
+    "Merit-only scholarship not linked to financial need or target demographics",
+    "Support or outcomes entirely before higher education entry",
+    "No credible comparator or counterfactual",
+    "No eligible student outcome",
+    "Ineligible study design",
+    "General funding policy without an identifiable student-level intervention",
+    "Ineligible publication type or insufficient information source",
+    "Published before 2014",
+    "English full text unavailable",
+]
 
 
 def main() -> None:
@@ -321,24 +365,37 @@ def reviewer_workbench(
     with st.container(border=True):
         render_record(records[selected])
     prior = existing.get(selected, {})
+    render_screening_criteria(f"reviewer_{selected}")
+    decision = st.segmented_control(
+        "Your decision",
+        DECISIONS,
+        default=prior.get("decision", "Unsure"),
+        key=f"reviewer_decision_{selected}",
+    )
     with st.form(f"decision_{selected}", border=False):
-        decision = st.segmented_control(
-            "Your decision",
-            DECISIONS,
-            default=prior.get("decision", "Unsure"),
-        )
-        exclusion_reason = st.text_input("Exclusion reason", value=prior.get("exclusion_reason") or "")
-        with st.expander("Optional notes", icon=":material/edit:"):
-            notes = st.text_area("Notes", value=prior.get("notes") or "")
+        exclusion_reasons: list[str] = []
+        if decision == "Exclude":
+            prior_reasons = parse_exclusion_reasons(prior.get("exclusion_reason"))
+            reason_options = EXCLUSION_REASONS + [reason for reason in prior_reasons if reason not in EXCLUSION_REASONS]
+            exclusion_reasons = st.multiselect(
+                "Exclusion criteria",
+                reason_options,
+                default=prior_reasons,
+                help="Select every criterion that clearly applies.",
+            )
+        notes = st.text_area("Notes", value=prior.get("notes") or "", placeholder="Optional paper-specific notes")
         submitted = st.form_submit_button("Save and continue", type="primary", disabled=bool(prior.get("locked")))
     if submitted:
+        if decision == "Exclude" and not exclusion_reasons:
+            st.error("Select at least one exclusion criterion before saving an Exclude decision.")
+            return
         storage.save_decision(
             {
                 "sample_id": sample_id,
                 "record_id": selected,
                 "reviewer_id": reviewer["reviewer_id"],
                 "decision": decision,
-                "exclusion_reason": exclusion_reason,
+                "exclusion_reason": format_exclusion_reasons(exclusion_reasons),
                 "notes": notes,
                 "locked": False,
             }
@@ -405,24 +462,38 @@ def adjudication_screen(storage: SupabaseReviewStorage | LocalReviewStorage, sam
         hide_index=True,
     )
     prior = adjudicated.get(selected, {})
+    render_screening_criteria(f"adjudicator_{selected}")
+    final_decision = st.segmented_control(
+        "Final blinded decision",
+        DECISIONS,
+        default=prior.get("final_decision", "Unsure"),
+        key=f"adjudicator_decision_{selected}",
+    )
     with st.form(f"adjudicate_{selected}"):
-        final_decision = st.segmented_control(
-            "Final blinded decision",
-            DECISIONS,
-            default=prior.get("final_decision", "Unsure"),
-        )
-        reason = st.text_input("Reason", value=prior.get("reason") or "")
+        exclusion_reasons: list[str] = []
+        if final_decision == "Exclude":
+            prior_reasons = parse_exclusion_reasons(prior.get("reason"))
+            reason_options = EXCLUSION_REASONS + [reason for reason in prior_reasons if reason not in EXCLUSION_REASONS]
+            exclusion_reasons = st.multiselect(
+                "Exclusion criteria",
+                reason_options,
+                default=prior_reasons,
+                help="Select every criterion that supports the final exclusion.",
+            )
         notes = st.text_area("Notes", value=prior.get("notes") or "")
         lock = st.checkbox("Lock this adjudication", value=bool(prior.get("locked")))
         submitted = st.form_submit_button("Save adjudication", disabled=bool(prior.get("locked")))
     if submitted:
+        if final_decision == "Exclude" and not exclusion_reasons:
+            st.error("Select at least one exclusion criterion before saving an Exclude decision.")
+            return
         storage.save_adjudication(
             {
                 "sample_id": sample_id,
                 "record_id": selected,
                 "adjudicator_id": adjudicator["reviewer_id"],
                 "final_decision": final_decision,
-                "reason": reason,
+                "reason": format_exclusion_reasons(exclusion_reasons),
                 "notes": notes,
                 "locked": lock,
                 "submitted_at": utc_now() if lock else None,
@@ -704,6 +775,30 @@ def render_record(row: dict[str, Any]) -> None:
         link_cols[0].write(f"DOI: {row['doi']}")
     if row.get("url"):
         link_cols[1].write(row["url"])
+
+
+def render_screening_criteria(key_suffix: str) -> None:
+    with st.expander("Screening criteria", icon=":material/checklist:"):
+        domain = st.selectbox(
+            "Criteria domain",
+            list(SCREENING_CRITERIA),
+            key=f"criteria_domain_{key_suffix}",
+        )
+        criterion = SCREENING_CRITERIA[domain]
+        st.markdown("**Include**")
+        st.write(criterion["include"])
+        st.markdown("**Exclude**")
+        st.write(criterion["exclude"])
+
+
+def parse_exclusion_reasons(value: Any) -> list[str]:
+    if not value:
+        return []
+    return [reason.strip() for reason in str(value).split(";") if reason.strip()]
+
+
+def format_exclusion_reasons(reasons: list[str]) -> str:
+    return "; ".join(dict.fromkeys(reason.strip() for reason in reasons if reason.strip()))
 
 
 def pair_vectors(decisions: list[dict[str, Any]], reviewer_a: str, reviewer_b: str) -> list[tuple[str, str]]:
