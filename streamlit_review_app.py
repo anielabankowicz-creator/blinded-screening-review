@@ -172,10 +172,18 @@ def lead_dashboard(storage: SupabaseReviewStorage | LocalReviewStorage, sample_i
         records = keyed(storage.get_records(storage.get_sample_record_ids(sample_id)))
         decisions = storage.get_decisions(sample_id)
         adjudications = storage.get_adjudications(sample_id)
+        reviewer_names = reviewer_display_names(storage.list_reviewers())
         if not records:
             st.info("Upload a spreadsheet and create the random sample first.")
         else:
-            review_dashboard(records, decisions, adjudications, show_agreement=True, show_ai=False)
+            review_dashboard(
+                records,
+                decisions,
+                adjudications,
+                show_agreement=True,
+                show_ai=False,
+                reviewer_names=reviewer_names,
+            )
 
     with accounts_tab:
         st.caption("Create separate access codes. Codes are hashed before storage; the app never displays existing codes.")
@@ -197,11 +205,12 @@ def lead_dashboard(storage: SupabaseReviewStorage | LocalReviewStorage, sample_i
         records = keyed(storage.get_records(storage.get_sample_record_ids(sample_id)))
         decisions = storage.get_decisions(sample_id)
         adjudications = keyed(storage.get_adjudications(sample_id), key="record_id")
+        reviewer_names = reviewer_display_names(storage.list_reviewers())
         if not records:
             st.info("Upload a spreadsheet and create the random sample first.")
         else:
             st.write("AI decisions are visible here only, after lead sign-in.")
-            show_metrics(records, decisions, adjudications)
+            show_metrics(records, decisions, adjudications, reviewer_names)
 
     with export_tab:
         records = keyed(storage.get_records(storage.get_sample_record_ids(sample_id)))
@@ -503,8 +512,20 @@ def adjudication_screen(storage: SupabaseReviewStorage | LocalReviewStorage, sam
         st.rerun()
 
 
-def show_metrics(records: dict[str, dict[str, Any]], decisions: list[dict[str, Any]], adjudications: dict[str, dict[str, Any]]) -> None:
-    review_dashboard(records, decisions, list(adjudications.values()), show_agreement=True, show_ai=True)
+def show_metrics(
+    records: dict[str, dict[str, Any]],
+    decisions: list[dict[str, Any]],
+    adjudications: dict[str, dict[str, Any]],
+    reviewer_names: dict[str, str] | None = None,
+) -> None:
+    review_dashboard(
+        records,
+        decisions,
+        list(adjudications.values()),
+        show_agreement=True,
+        show_ai=True,
+        reviewer_names=reviewer_names,
+    )
 
 
 def review_dashboard(
@@ -514,7 +535,9 @@ def review_dashboard(
     *,
     show_agreement: bool,
     show_ai: bool,
+    reviewer_names: dict[str, str] | None = None,
 ) -> None:
+    reviewer_names = reviewer_names or {}
     reviewer_ids = sorted({row["reviewer_id"] for row in decisions})
     sample_size = len(records)
     by_reviewer = {reviewer_id: [row for row in decisions if row["reviewer_id"] == reviewer_id] for reviewer_id in reviewer_ids}
@@ -529,7 +552,7 @@ def review_dashboard(
     if reviewer_ids:
         progress_rows = [
             {
-                "reviewer": reviewer_id,
+                "reviewer": reviewer_names.get(reviewer_id, reviewer_id),
                 "saved": len(rows),
                 "remaining": max(sample_size - len(rows), 0),
                 "completion": safe_div(len(rows), sample_size) or 0,
@@ -555,7 +578,12 @@ def review_dashboard(
     if decisions:
         with st.container(border=True):
             st.subheader("Decision mix", icon=":material/bar_chart:")
-            st.bar_chart(decision_mix_frame(decisions), x="decision", y="count", color="reviewer")
+            st.bar_chart(
+                decision_mix_frame(decisions, reviewer_names),
+                x="decision",
+                y="count",
+                color="reviewer",
+            )
 
     if show_agreement and len(reviewer_ids) >= 2:
         a, b = reviewer_ids[:2]
@@ -572,7 +600,8 @@ def review_dashboard(
         for reviewer_id in reviewer_ids:
             pair = reviewer_ai_vectors(records, decisions, reviewer_id)
             with st.container(border=True):
-                st.subheader(f"{reviewer_id} vs AI", icon=":material/analytics:")
+                reviewer_label = reviewer_names.get(reviewer_id, reviewer_id)
+                st.subheader(f"{reviewer_label} vs AI", icon=":material/analytics:")
                 cols = st.columns(6)
                 ai_stats = binary_ai_stats(pair)
                 cols[0].metric("Agreement", f"{percent_agreement(pair):.1%}" if pair else "n/a")
@@ -632,13 +661,35 @@ def reviewer_dashboard(record_ids: list[str], decisions: list[dict[str, Any]], r
             )
 
 
-def decision_mix_frame(decisions: list[dict[str, Any]]) -> pd.DataFrame:
-    counts = Counter((row.get("reviewer_id", "reviewer"), row.get("decision", "Unsure")) for row in decisions)
+def decision_mix_frame(
+    decisions: list[dict[str, Any]],
+    reviewer_names: dict[str, str] | None = None,
+) -> pd.DataFrame:
+    reviewer_names = reviewer_names or {}
+    counts = Counter(
+        (
+            reviewer_names.get(row.get("reviewer_id", "reviewer"), row.get("reviewer_id", "reviewer")),
+            row.get("decision", "Unsure"),
+        )
+        for row in decisions
+    )
     rows = [
         {"reviewer": reviewer, "decision": decision, "count": count}
         for (reviewer, decision), count in sorted(counts.items())
     ]
     return pd.DataFrame(rows or [{"reviewer": "", "decision": decision, "count": 0} for decision in DECISIONS])
+
+
+def reviewer_display_names(reviewers: list[dict[str, Any]]) -> dict[str, str]:
+    name_counts = Counter(row.get("display_name") or row.get("reviewer_id") for row in reviewers)
+    return {
+        row["reviewer_id"]: (
+            f"{row.get('display_name') or row['reviewer_id']} ({row['reviewer_id']})"
+            if name_counts[row.get("display_name") or row["reviewer_id"]] > 1
+            else row.get("display_name") or row["reviewer_id"]
+        )
+        for row in reviewers
+    }
 
 
 def conflicting_record_ids(decisions: list[dict[str, Any]]) -> list[str]:

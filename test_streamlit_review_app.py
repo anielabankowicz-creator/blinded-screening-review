@@ -1,6 +1,12 @@
 import unittest
 
-from streamlit_review_app import format_exclusion_reasons, parse_exclusion_reasons, partition_record_ids
+from streamlit_review_app import (
+    decision_mix_frame,
+    format_exclusion_reasons,
+    parse_exclusion_reasons,
+    partition_record_ids,
+    reviewer_display_names,
+)
 
 
 class PartitionRecordIdsTest(unittest.TestCase):
@@ -30,6 +36,38 @@ class ExclusionReasonsTest(unittest.TestCase):
         self.assertEqual(
             format_exclusion_reasons(["Ineligible population", "", "Ineligible population"]),
             "Ineligible population",
+        )
+
+
+class ReviewerNamesTest(unittest.TestCase):
+    def test_dashboard_uses_distinct_display_names(self) -> None:
+        reviewers = [
+            {"reviewer_id": "reviewer_a", "display_name": "Alice"},
+            {"reviewer_id": "reviewer_b", "display_name": "Bob"},
+        ]
+        names = reviewer_display_names(reviewers)
+        decisions = [
+            {"reviewer_id": "reviewer_a", "decision": "Include"},
+            {"reviewer_id": "reviewer_b", "decision": "Exclude"},
+        ]
+
+        frame = decision_mix_frame(decisions, names)
+
+        self.assertEqual(names, {"reviewer_a": "Alice", "reviewer_b": "Bob"})
+        self.assertEqual(set(frame["reviewer"]), {"Alice", "Bob"})
+
+    def test_duplicate_display_names_include_account_id(self) -> None:
+        reviewers = [
+            {"reviewer_id": "reviewer_a", "display_name": "Reviewer"},
+            {"reviewer_id": "reviewer_b", "display_name": "Reviewer"},
+        ]
+
+        self.assertEqual(
+            reviewer_display_names(reviewers),
+            {
+                "reviewer_a": "Reviewer (reviewer_a)",
+                "reviewer_b": "Reviewer (reviewer_b)",
+            },
         )
 
 
