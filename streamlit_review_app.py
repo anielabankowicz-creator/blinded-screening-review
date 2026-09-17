@@ -263,6 +263,14 @@ def reviewer_screen(storage: SupabaseReviewStorage | LocalReviewStorage, sample_
         st.info("The lead needs to upload the AI spreadsheet and create the random sample before reviewing starts.")
         return
     records = keyed(storage.get_records(record_ids))
+    available_ids, missing_ids = partition_record_ids(record_ids, records)
+    if missing_ids:
+        st.error(
+            f"{len(missing_ids)} sampled record(s) could not be loaded. "
+            "The lead should recreate the sample before reviews are locked."
+        )
+    if not available_ids:
+        st.stop()
     existing = keyed(storage.get_decisions(sample_id, reviewer["reviewer_id"]), key="record_id")
     locked = bool(existing) and all(row.get("locked") for row in existing.values()) and len(existing) >= len(record_ids)
 
@@ -276,7 +284,16 @@ def reviewer_screen(storage: SupabaseReviewStorage | LocalReviewStorage, sample_
         reviewer_dashboard(record_ids, decisions, reviewer)
 
     with review_tab:
-        reviewer_workbench(storage, sample_id, reviewer, record_ids, records, existing, locked)
+        reviewer_workbench(
+            storage,
+            sample_id,
+            reviewer,
+            available_ids,
+            records,
+            existing,
+            locked,
+            sample_is_complete=not missing_ids,
+        )
 
 
 def reviewer_workbench(
@@ -287,6 +304,7 @@ def reviewer_workbench(
     records: dict[str, dict[str, Any]],
     existing: dict[str, dict[str, Any]],
     locked: bool,
+    sample_is_complete: bool,
 ) -> None:
     progress_cols = st.columns(3)
     progress_cols[0].metric("Saved", len(existing))
@@ -328,7 +346,11 @@ def reviewer_workbench(
         st.toast("Saved")
         st.rerun()
 
-    complete = len(existing) >= len(record_ids) and all(row.get("decision") in DECISIONS for row in existing.values())
+    complete = (
+        sample_is_complete
+        and len(existing) >= len(record_ids)
+        and all(row.get("decision") in DECISIONS for row in existing.values())
+    )
     with st.expander("Finish and lock your review", icon=":material/lock:"):
         st.write("Lock only when every sampled record has been screened. Locked submissions cannot be edited.")
         if st.button("Lock my completed review", disabled=locked or not complete):
@@ -342,20 +364,29 @@ def reviewer_workbench(
 def adjudication_screen(storage: SupabaseReviewStorage | LocalReviewStorage, sample_id: str, adjudicator: dict[str, Any]) -> None:
     record_ids = storage.get_sample_record_ids(sample_id)
     records = keyed(storage.get_records(record_ids))
+    available_ids, missing_ids = partition_record_ids(record_ids, records)
     decisions = storage.get_decisions(sample_id)
     by_record: dict[str, list[dict[str, Any]]] = {}
     for row in decisions:
         by_record.setdefault(row["record_id"], []).append(row)
     conflicts = [
-        rid for rid in record_ids
+        rid for rid in available_ids
         if len({row["decision"] for row in by_record.get(rid, [])}) > 1
     ]
     adjudicated = keyed(storage.get_adjudications(sample_id), key="record_id")
 
     st.subheader("Blinded adjudication", icon=":material/rule:")
     st.caption("This screen shows reviewer decisions but keeps AI decisions hidden.")
+    if missing_ids:
+        st.error(
+            f"{len(missing_ids)} sampled record(s) could not be loaded. "
+            "The lead should recreate the sample to restore complete adjudication."
+        )
+    if not available_ids:
+        st.info("No sampled records are available for adjudication.")
+        return
     st.metric("Reviewer conflicts", len(conflicts))
-    target_ids = conflicts or record_ids
+    target_ids = conflicts or available_ids
     selected = st.selectbox("Record", target_ids, format_func=lambda rid: f"{rid}: {records.get(rid, {}).get('title', '')[:90]}")
     render_record(records[selected])
     st.write("Reviewer decisions")
@@ -639,6 +670,15 @@ def reproducible_sample(record_ids: list[str], sample_size: int, seed: int) -> l
 
 def keyed(rows: list[dict[str, Any]], key: str = "record_id") -> dict[str, dict[str, Any]]:
     return {row[key]: row for row in rows if row.get(key)}
+
+
+def partition_record_ids(
+    record_ids: list[str],
+    records: dict[str, dict[str, Any]],
+) -> tuple[list[str], list[str]]:
+    available = [record_id for record_id in record_ids if record_id in records]
+    missing = [record_id for record_id in record_ids if record_id not in records]
+    return available, missing
 
 
 def record_selector(record_ids: list[str], records: dict[str, dict[str, Any]], existing: dict[str, dict[str, Any]]) -> str | None:
