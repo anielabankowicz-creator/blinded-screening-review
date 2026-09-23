@@ -602,14 +602,15 @@ def review_dashboard(
             with st.container(border=True):
                 reviewer_label = reviewer_names.get(reviewer_id, reviewer_id)
                 st.subheader(f"{reviewer_label} vs AI", icon=":material/analytics:")
-                cols = st.columns(6)
                 ai_stats = binary_ai_stats(pair)
-                cols[0].metric("Agreement", f"{percent_agreement(pair):.1%}" if pair else "n/a")
-                cols[1].metric("Kappa", f"{cohens_kappa(pair):.3f}" if pair else "n/a")
-                cols[2].metric("AI recall", pct(ai_stats.get("recall")))
-                cols[3].metric("Specificity", pct(ai_stats.get("specificity")))
-                cols[4].metric("PPV / NPV", f"{pct(ai_stats.get('ppv'))} / {pct(ai_stats.get('npv'))}")
-                cols[5].metric("False-exclusion", pct(ai_stats.get("false_exclusion_rate")))
+                with st.container(horizontal=True):
+                    st.metric("Agreement", f"{percent_agreement(pair):.1%}" if pair else "n/a", border=True)
+                    st.metric("Kappa", f"{cohens_kappa(pair):.3f}" if pair else "n/a", border=True)
+                    st.metric("AI recall", pct(ai_stats.get("recall")), border=True)
+                    st.metric("Specificity", pct(ai_stats.get("specificity")), border=True)
+                    st.metric("PPV", pct(ai_stats.get("ppv")), border=True)
+                    st.metric("NPV", pct(ai_stats.get("npv")), border=True)
+                    st.metric("False-exclusion", pct(ai_stats.get("false_exclusion_rate")), border=True)
                 st.dataframe(confusion_matrix(pair), width="stretch", hide_index=True)
 
 
