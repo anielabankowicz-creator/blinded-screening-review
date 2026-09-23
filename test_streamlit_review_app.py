@@ -1,6 +1,7 @@
 import unittest
 
 from streamlit_review_app import (
+    clear_ai_pairs,
     decision_mix_frame,
     format_exclusion_reasons,
     parse_exclusion_reasons,
@@ -68,6 +69,21 @@ class ReviewerNamesTest(unittest.TestCase):
                 "reviewer_a": "Reviewer (reviewer_a)",
                 "reviewer_b": "Reviewer (reviewer_b)",
             },
+        )
+
+
+class AiAgreementTest(unittest.TestCase):
+    def test_clear_pairs_exclude_uncertain_decisions(self) -> None:
+        pairs = [
+            ("Include", "Include"),
+            ("Exclude", "Exclude"),
+            ("Include", "Unsure"),
+            ("Unsure", "Exclude"),
+        ]
+
+        self.assertEqual(
+            clear_ai_pairs(pairs),
+            [("Include", "Include"), ("Exclude", "Exclude")],
         )
 
 

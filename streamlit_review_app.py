@@ -603,14 +603,32 @@ def review_dashboard(
                 reviewer_label = reviewer_names.get(reviewer_id, reviewer_id)
                 st.subheader(f"{reviewer_label} vs AI", icon=":material/analytics:")
                 ai_stats = binary_ai_stats(pair)
+                clear_pairs = clear_ai_pairs(pair)
+                ai_uncertain = sum(1 for _, ai in pair if ai == "Unsure")
                 with st.container(horizontal=True):
-                    st.metric("Agreement", f"{percent_agreement(pair):.1%}" if pair else "n/a", border=True)
-                    st.metric("Kappa", f"{cohens_kappa(pair):.3f}" if pair else "n/a", border=True)
-                    st.metric("AI recall", pct(ai_stats.get("recall")), border=True)
+                    st.metric("Records compared", len(pair), border=True)
+                    st.metric("Overall agreement", f"{percent_agreement(pair):.1%}" if pair else "n/a", border=True)
+                    st.metric(
+                        "Clear-decision agreement",
+                        f"{percent_agreement(clear_pairs):.1%}" if clear_pairs else "n/a",
+                        border=True,
+                    )
+                    st.metric(
+                        "AI uncertain",
+                        f"{ai_uncertain} ({ai_uncertain / len(pair):.1%})" if pair else "n/a",
+                        border=True,
+                    )
+                    st.metric("Three-category kappa", f"{cohens_kappa(pair):.3f}" if pair else "n/a", border=True)
+                st.caption(
+                    "Overall agreement requires an exact Include, Exclude, or Unsure match. "
+                    "Clear-decision agreement excludes comparisons where either decision is Unsure."
+                )
+                with st.container(horizontal=True):
+                    st.metric("AI inclusion recall", pct(ai_stats.get("recall")), border=True)
                     st.metric("Specificity", pct(ai_stats.get("specificity")), border=True)
                     st.metric("PPV", pct(ai_stats.get("ppv")), border=True)
                     st.metric("NPV", pct(ai_stats.get("npv")), border=True)
-                    st.metric("False-exclusion", pct(ai_stats.get("false_exclusion_rate")), border=True)
+                    st.metric("AI false-exclusion rate", pct(ai_stats.get("false_exclusion_rate")), border=True)
                 st.dataframe(confusion_matrix(pair), width="stretch", hide_index=True)
 
 
@@ -911,6 +929,14 @@ def binary_ai_stats(pairs: list[tuple[str, str]]) -> dict[str, float | None]:
         "npv": safe_div(tn, tn + fn),
         "false_exclusion_rate": safe_div(fn, tp + fn),
     }
+
+
+def clear_ai_pairs(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    return [
+        (human, ai)
+        for human, ai in pairs
+        if human in {"Include", "Exclude"} and ai in {"Include", "Exclude"}
+    ]
 
 
 def safe_div(num: int, den: int) -> float | None:
